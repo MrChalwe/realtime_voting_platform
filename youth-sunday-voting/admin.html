@@ -3,29 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Admin — Get Kreative Voting</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <meta name="theme-color" content="#5b3df5">
+  <title>Admin | Get Kreative Voting</title>
   <link href="style.css" rel="stylesheet">
 </head>
 <body>
-  <div class="hero">
-    <img src="logo.png" alt="Get Kreative" class="gk-logo" onerror="this.style.display='none'"><br>
-    <div class="gk-wordmark mb-2">Get <b>Kreative</b> Media</div>
-    <small>⚙️ ADMIN</small>
-    <h1>Voting Control Room</h1>
-  </div>
-  <div class="container-narrow" id="app"></div>
-  <div class="gk-footer">A <b>Get Kreative Media</b> project</div>
-  <div id="flash" class="flash d-none"></div>
+  <main class="wrap">
+    <div class="topbar">
+      <div class="brand"><img src="logo.png" alt="" onerror="this.style.display='none'"><span>Get Kreative Media</span></div>
+      <div id="navRight"></div>
+    </div>
+    <div id="app"></div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="config.js"></script>
+  <script src="ui.js"></script>
   <script>
     let rooms = [], cur = null, parts = [], chan = null;
     init();
-
-    function flash(msg) { const f = $("#flash"); f.textContent = msg; f.classList.remove("d-none"); setTimeout(() => f.classList.add("d-none"), 2200); }
 
     async function init() {
       const { data: { session } } = await sb.auth.getSession();
@@ -33,159 +32,153 @@
       showLogin();
     }
 
+    // ---------- Login ----------
     function showLogin(err = "") {
-      $("#app").innerHTML = `
-        <div class="card card-p"><div class="card-body">
-          <h5 class="mb-3">Admin login</h5>
-          ${err ? `<div class="alert alert-danger py-2">${esc(err)}</div>` : ""}
-          <form onsubmit="login(event)">
-            <input class="form-control mb-2" type="email" name="email" placeholder="Email" required autocomplete="username">
-            <input class="form-control mb-3" type="password" name="password" placeholder="Password" required autocomplete="current-password">
-            <button class="btn-brand w-100">Log in</button>
-          </form>
-        </div></div>`;
+      $("#navRight").innerHTML = "";
+      $("#app").innerHTML = '<div class="narrow"><div class="tile t-brand" style="padding:24px">' +
+        '<h1 style="font-size:2rem;font-weight:800;letter-spacing:-.03em;line-height:1">Admin login</h1>' +
+        '<p style="margin:8px 0 18px;opacity:.9">Sign in to manage voting sessions.</p>' +
+        (err ? '<div class="note" style="margin-bottom:14px;color:var(--ink)"><b>Could not sign in</b>' + esc(err) + "</div>" : "") +
+        '<form class="form" onsubmit="login(event)">' +
+        '<label>Email<input class="field" type="email" name="email" required autocomplete="username"></label>' +
+        '<label>Password<input class="field" type="password" name="password" required autocomplete="current-password"></label>' +
+        '<button class="btn light block">Log in</button></form></div></div>';
     }
 
     async function login(e) {
       e.preventDefault();
       const f = e.target;
       const { error } = await sb.auth.signInWithPassword({ email: f.email.value, password: f.password.value });
-      if (error) return showLogin(error.message);
+      if (error) return showLogin("Check your email and password and try again.");
       afterLogin();
     }
 
     async function afterLogin() {
       const { data: { user } } = await sb.auth.getUser();
       const { data } = await sb.from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
-      if (!data) { await sb.auth.signOut(); return showLogin("This account is not an admin."); }
+      if (!data) { await sb.auth.signOut(); return showLogin("This account is not set up as an admin. Run the admin SQL from the README with this email."); }
+      $("#navRight").innerHTML = '<button class="btn small ghost" onclick="logout()">Log out</button>';
       loadRooms();
     }
 
     async function logout() { await sb.auth.signOut(); showLogin(); }
 
-    // ---------- Room list ----------
+    // ---------- Session list ----------
     async function loadRooms() {
       const { data } = await sb.from("rooms").select("*").order("created_at", { ascending: false });
       rooms = data || [];
       viewList();
     }
 
-    function badge(s) {
-      return s === "open" ? '<span class="badge text-bg-success">Open</span>'
-        : s === "closed" ? '<span class="badge text-bg-secondary">Closed</span>'
-        : '<span class="badge text-bg-warning">Draft</span>';
+    function pill(s) {
+      const label = s === "open" ? "Voting open" : s === "closed" ? "Voting closed" : "Draft";
+      const dot = s === "open" ? '<span class="dot"></span>' : '<span class="dot off"></span>';
+      return '<span class="pill dark">' + dot + label + "</span>";
     }
 
     function viewList() {
       cur = null;
       if (chan) { sb.removeChannel(chan); chan = null; }
-      $("#app").innerHTML = `
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h5 class="mb-0">Your sessions</h5>
-          <button class="btn btn-sm btn-outline-secondary" onclick="logout()">Log out</button>
-        </div>
-        ${rooms.map(r => `
-          <button class="btn btn-light card-p w-100 text-start p-3 mb-2" onclick="manage('${r.id}')">
-            <div class="d-flex justify-content-between"><b>${esc(r.title)}</b>${badge(r.status)}</div>
-            <small class="text-muted">${esc(r.description || "")}</small>
-          </button>`).join("") || '<p class="text-muted">No sessions yet — create your first one below.</p>'}
-        <div class="card card-p mt-4"><div class="card-body">
-          <h6>➕ New session</h6>
-          <form onsubmit="createRoom(event)">
-            <input class="form-control mb-2" name="title" placeholder="Title e.g. Youth Sunday Presentations" required>
-            <textarea class="form-control mb-3" name="description" rows="2" placeholder="Description (optional)"></textarea>
-            <button class="btn-brand w-100">Create session</button>
-          </form>
-        </div></div>`;
+      $("#app").innerHTML = '<div class="bento">' +
+        '<div class="tile t-brand span-all" style="min-height:170px;display:flex;flex-direction:column;justify-content:flex-end">' +
+        '<h1 style="font-size:clamp(2rem,8vw,3.2rem);font-weight:800;letter-spacing:-.03em;line-height:1">Your sessions</h1>' +
+        '<p style="margin-top:8px;opacity:.9">Create a session, add the participants, then open voting.</p></div>' +
+        rooms.map((r) => '<button class="tile session" data-room="' + r.id + '">' + pill(r.status) +
+          "<b>" + esc(r.title) + '</b><span class="sub">' + esc(r.description || "No description") + "</span></button>").join("") +
+        '<div class="tile t-sun span-2"><h2 style="font-size:1.4rem;font-weight:800;letter-spacing:-.02em;margin-bottom:12px">New session</h2>' +
+        '<form class="form" onsubmit="createRoom(event)">' +
+        '<label>Title<input class="field" name="title" placeholder="Youth Sunday Presentations" required></label>' +
+        '<label>Description (optional)<textarea class="field" name="description" rows="2"></textarea></label>' +
+        '<button class="btn block">Create session</button></form></div></div>';
+      $("#app").querySelectorAll("[data-room]").forEach((b) => (b.onclick = () => manage(b.dataset.room)));
     }
 
     async function createRoom(e) {
       e.preventDefault();
       const f = e.target;
       const { data, error } = await sb.from("rooms").insert({ title: f.title.value.trim(), description: f.description.value.trim() || null }).select().single();
-      if (error) return alert(error.message);
+      if (error) return toast("Couldn't create the session: " + error.message);
       rooms.unshift(data);
       manage(data.id);
     }
 
-    // ---------- Manage one room ----------
+    // ---------- One session ----------
     async function manage(id) {
-      cur = rooms.find(r => r.id === id);
+      cur = rooms.find((r) => r.id === id);
       await loadParts();
       shell();
-      renderParts();
+      paint();
       if (chan) sb.removeChannel(chan);
       chan = sb.channel("admin-" + id)
-        .on("postgres_changes", { event: "*", schema: "public", table: "participants", filter: "room_id=eq." + id }, async () => { await loadParts(); renderParts(); })
+        .on("postgres_changes", { event: "*", schema: "public", table: "participants", filter: "room_id=eq." + id }, async () => { await loadParts(); paint(); })
         .subscribe();
     }
 
     async function loadParts() {
       const { data } = await sb.from("participants").select("*").eq("room_id", cur.id)
         .order("vote_count", { ascending: false }).order("created_at");
-      parts = data || [];
+      parts = sortedByVotes(data || []);
     }
 
     function shell() {
       const voterUrl = new URL("index.html?room=" + cur.id, location.href).href;
       const screenUrl = new URL("screen.html?room=" + cur.id, location.href).href;
-      $("#app").innerHTML = `
-        <button class="btn btn-sm btn-link px-0 mb-2" onclick="loadRooms()">← All sessions</button>
-        <div class="card card-p mb-3"><div class="card-body">
-          <div class="d-flex justify-content-between align-items-start">
-            <div><h5 class="mb-1">${esc(cur.title)}</h5><div class="small text-muted">${esc(cur.description || "")}</div></div>
-            ${badge(cur.status)}
-          </div>
-          <div class="d-grid gap-2 mt-3">
-            ${cur.status !== "open" ? `<button class="btn btn-success" onclick="setStatus('open')">▶ Open voting</button>` : ""}
-            ${cur.status === "open" ? `<button class="btn btn-danger" onclick="setStatus('closed')">⏹ Close voting &amp; reveal winner</button>` : ""}
-            ${cur.status === "closed" ? `<button class="btn btn-outline-secondary" onclick="setStatus('draft')">Back to draft</button>` : ""}
-          </div>
-        </div></div>
+      const action =
+        cur.status !== "open" ? '<button class="btn go" onclick="setStatus(\'open\')">Open voting</button>' :
+        '<button class="btn stop" onclick="setStatus(\'closed\')">Close voting and show winner</button>';
+      const back = cur.status === "closed" ? '<button class="link" onclick="setStatus(\'draft\')" style="margin-top:4px">Move back to draft</button>' : "";
 
-        <div class="card card-p mb-3"><div class="card-body text-center">
-          <h6>📲 Share with the congregation</h6>
-          <div id="qr" class="d-flex justify-content-center my-2"></div>
-          <div class="input-group input-group-sm mb-2"><input class="form-control" readonly value="${voterUrl}" id="vlink"><button class="btn btn-outline-primary" onclick="copy('vlink')">Copy</button></div>
-          <a class="btn btn-sm btn-outline-dark" href="${screenUrl}" target="_blank">🖥️ Open big-screen results</a>
-        </div></div>
-
-        <div class="card card-p mb-3"><div class="card-body">
-          <h6>➕ Add participant</h6>
-          <form onsubmit="addPart(event)">
-            <input class="form-control mb-2" name="name" placeholder="Participant name" required>
-            <input class="form-control mb-2" name="project" placeholder="Presentation / project title" required>
-            <textarea class="form-control mb-3" name="description" rows="2" placeholder="Short description (optional)"></textarea>
-            <button class="btn-brand w-100">Add participant</button>
-          </form>
-        </div></div>
-
-        <h6 class="mb-2">Participants &amp; live votes</h6>
-        <div id="plist"></div>
-
-        <div class="d-grid gap-2 mt-4 mb-5">
-          <button class="btn btn-outline-warning" onclick="resetVotes()">↺ Reset all votes to 0</button>
-          <button class="btn btn-outline-danger" onclick="delRoom()">🗑 Delete this session</button>
-        </div>`;
-      new QRCode($("#qr"), { text: voterUrl, width: 170, height: 170 });
+      $("#app").innerHTML =
+        '<button class="link" onclick="loadRooms()" style="margin:0 2px 12px">Back to all sessions</button>' +
+        '<div class="bento">' +
+          '<div class="tile t-brand hero-title">' + pill(cur.status).replace("pill dark", "pill") +
+            "<h1>" + esc(cur.title) + '</h1><p class="lede">' + esc(cur.description || "") + "</p>" +
+            '<div style="display:grid;gap:6px;justify-items:start">' + action + back + "</div></div>" +
+          '<div class="tile t-sun stat"><div class="num" id="aVotes">0</div><div class="cap">votes cast</div></div>' +
+          '<div class="tile t-mint stat"><div class="num" id="aParts">0</div><div class="cap" id="aPartsCap">participants</div></div>' +
+          '<div class="tile t-white sharebox span-2"><b>Share with the congregation</b>' +
+            '<div class="qr" id="qr"></div>' +
+            '<div class="linkrow"><input class="field" readonly value="' + voterUrl + '" id="vlink" aria-label="Voting link"><button class="btn small" onclick="copyLink()">Copy</button></div>' +
+            '<a class="btn small ghost" href="' + screenUrl + '" target="_blank" rel="noopener">Open the big-screen results</a></div>' +
+        "</div>" +
+        '<h2 class="section">Live results</h2><div class="bento" id="board"></div>' +
+        '<h2 class="section">Participants</h2>' +
+        '<div class="bento">' +
+          '<div class="tile t-lilac span-2"><h3 style="font-size:1.25rem;font-weight:800;letter-spacing:-.02em;margin-bottom:12px">Add a participant</h3>' +
+            '<form class="form" onsubmit="addPart(event)">' +
+            '<label>Name<input class="field" name="name" required></label>' +
+            '<label>Presentation or project title<input class="field" name="project" required></label>' +
+            '<label>Short description (optional)<textarea class="field" name="description" rows="2"></textarea></label>' +
+            '<button class="btn block">Add participant</button></form></div>' +
+          '<div class="tile t-white span-2"><h3 style="font-size:1.25rem;font-weight:800;letter-spacing:-.02em;margin-bottom:8px">Remove a participant</h3><div id="manageList"></div></div>' +
+        "</div>" +
+        '<h2 class="section">Danger zone</h2>' +
+        '<div class="bento"><div class="tile t-white span-all" style="display:flex;flex-wrap:wrap;gap:10px">' +
+          '<button class="btn ghost" onclick="resetVotes()">Reset all votes to 0</button>' +
+          '<button class="btn stop" onclick="delRoom()">Delete this session</button></div></div>';
+      new QRCode($("#qr"), { text: voterUrl, width: 168, height: 168 });
     }
 
-    function renderParts() {
-      const el = $("#plist"); if (!el) return;
-      if (!parts.length) { el.innerHTML = '<p class="text-muted">No participants yet.</p>'; return; }
+    function paint() {
+      if (!$("#board")) return;
       const total = parts.reduce((a, b) => a + b.vote_count, 0);
-      el.innerHTML = `<div class="small text-muted mb-2">${total} total votes</div>` + leaderboardHTML(parts) +
-        `<details class="mt-2"><summary class="small text-muted">Remove a participant</summary>` +
-        parts.map(p => `<div class="d-flex justify-content-between align-items-center py-1"><span>${esc(p.name)}</span><button class="btn btn-sm btn-outline-danger" onclick="delPart('${p.id}')">Remove</button></div>`).join("") +
-        `</details>`;
+      $("#aVotes").textContent = total;
+      $("#aParts").textContent = parts.length;
+      $("#aPartsCap").textContent = parts.length === 1 ? "participant" : "participants";
+      renderBoard($("#board"), parts, { closed: cur.status === "closed" });
+      $("#manageList").innerHTML = parts.length
+        ? parts.map((p) => '<div class="manage-row"><span>' + esc(p.name) + '</span><button class="btn small ghost" data-del="' + p.id + '">Remove</button></div>').join("")
+        : '<p style="opacity:.8">No participants yet.</p>';
+      $("#manageList").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => delPart(b.dataset.del)));
     }
 
     async function setStatus(s) {
-      if (s === "closed" && !confirm("Close voting? Members won't be able to vote or change votes.")) return;
+      if (s === "closed" && !confirm("Close voting? Members won't be able to vote or change their vote.")) return;
       const { error } = await sb.from("rooms").update({ status: s }).eq("id", cur.id);
-      if (error) return alert(error.message);
-      cur.status = s; shell(); renderParts();
-      flash(s === "open" ? "Voting is OPEN" : s === "closed" ? "Voting closed" : "Back to draft");
+      if (error) return toast("Couldn't update the session: " + error.message);
+      cur.status = s;
+      shell(); paint();
+      toast(s === "open" ? "Voting is open" : s === "closed" ? "Voting is closed" : "Moved back to draft");
     }
 
     async function addPart(e) {
@@ -193,30 +186,34 @@
       const f = e.target;
       const { error } = await sb.from("participants").insert({
         room_id: cur.id, name: f.name.value.trim(), project: f.project.value.trim(), description: f.description.value.trim() || null });
-      if (error) return alert(error.message);
-      f.reset(); await loadParts(); renderParts(); flash("Participant added");
+      if (error) return toast("Couldn't add the participant: " + error.message);
+      f.reset(); await loadParts(); paint(); toast("Participant added");
     }
 
     async function delPart(id) {
       if (!confirm("Remove this participant and their votes?")) return;
       await sb.from("participants").delete().eq("id", id);
-      await loadParts(); renderParts();
+      await loadParts(); paint(); toast("Participant removed");
     }
 
     async function resetVotes() {
-      if (!confirm("Reset ALL votes in this session to zero?")) return;
+      if (!confirm("Reset all votes in this session to zero? This can't be undone.")) return;
       const { error } = await sb.rpc("reset_room_votes", { p_room: cur.id });
-      if (error) return alert(error.message);
-      await loadParts(); renderParts(); flash("Votes reset");
+      if (error) return toast("Couldn't reset the votes: " + error.message);
+      await loadParts(); paint(); toast("Votes reset to 0");
     }
 
     async function delRoom() {
-      if (!confirm("Delete this whole session? This cannot be undone.")) return;
+      if (!confirm("Delete this whole session? This can't be undone.")) return;
       await sb.from("rooms").delete().eq("id", cur.id);
       await loadRooms();
     }
 
-    function copy(id) { const i = document.getElementById(id); i.select(); navigator.clipboard?.writeText(i.value); flash("Link copied"); }
+    function copyLink() {
+      const i = $("#vlink"); i.select();
+      navigator.clipboard?.writeText(i.value);
+      toast("Link copied");
+    }
   </script>
 </body>
 </html>

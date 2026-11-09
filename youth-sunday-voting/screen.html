@@ -3,34 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Live Results Screen</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>Live results | Get Kreative Media</title>
   <link href="style.css" rel="stylesheet">
 </head>
-<body class="screen-body">
-  <div class="container py-4" style="max-width:1000px">
-    <div class="text-center mb-4">
-      <img src="logo.png" alt="Get Kreative" class="gk-logo" onerror="this.style.display='none'"><br>
-      <div class="gk-wordmark mb-2">Get <b>Kreative</b> Media</div>
-      <div class="text-muted">🗳️ LIVE RESULTS</div>
-      <h1 class="fw-bold display-5" id="title">Youth Sunday</h1>
-      <div id="status"></div>
-    </div>
-    <div id="board"></div>
-    <div class="gk-footer">A <b>Get Kreative Media</b> project</div>
-  </div>
+<body class="screen">
+  <main class="wrap">
+    <header class="head">
+      <div>
+        <div class="brand"><img src="logo.png" alt="" onerror="this.style.display='none'"><span>Get Kreative Media</span></div>
+        <h1 id="title">Live results</h1>
+      </div>
+      <div class="meta">
+        <div class="big" id="total">0</div>
+        <div class="cap" id="cap">votes so far</div>
+      </div>
+    </header>
+    <p class="hint" id="note"></p>
+    <div class="bento" id="board"></div>
+    <p class="foot">A Get Kreative Media project</p>
+  </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
+  <script src="ui.js"></script>
   <script>
-    // Project this page on the church screen: screen.html?room=ROOM_ID  (admin page gives you this link)
+    // Put this page on the church screen: screen.html?room=ROOM_ID (the admin page has the link).
     let room = null;
     (async function () {
       const id = new URLSearchParams(location.search).get("room");
       let q = sb.from("rooms").select("*").in("status", ["open", "closed"]).order("created_at", { ascending: false }).limit(1);
       if (id) q = sb.from("rooms").select("*").eq("id", id).limit(1);
       const { data } = await q;
-      if (!data || !data.length) { $("#board").innerHTML = "<p class='text-center text-muted fs-4'>Waiting for voting to start…</p>"; return; }
+      if (!data || !data.length) {
+        $("#board").innerHTML = '<div class="tile empty">Waiting for voting to start. This screen will update on its own.</div>';
+        setTimeout(() => location.reload(), 10000);
+        return;
+      }
       room = data[0];
       $("#title").textContent = room.title;
       await load();
@@ -44,9 +52,13 @@
     async function load() {
       const { data } = await sb.from("participants").select("*").eq("room_id", room.id)
         .order("vote_count", { ascending: false }).order("created_at");
-      const total = (data || []).reduce((a, b) => a + b.vote_count, 0);
-      $("#status").innerHTML = `<span class="badge ${room.status === "open" ? "text-bg-success" : "text-bg-secondary"} fs-6">${room.status === "open" ? "Voting open" : "Voting closed"}</span> <span class="text-muted ms-2">${total} votes</span>`;
-      $("#board").innerHTML = leaderboardHTML(data || [], { big: true });
+      const parts = sortedByVotes(data || []);
+      const closed = room.status === "closed";
+      const total = parts.reduce((a, b) => a + b.vote_count, 0);
+      $("#total").textContent = total;
+      $("#cap").textContent = (total === 1 ? "vote" : "votes") + (closed ? " in total" : " so far");
+      $("#note").textContent = closed ? standingsNote(parts, true) : "Voting is open. Vote from your phone and watch the scores move here.";
+      renderBoard($("#board"), parts, { closed });
     }
   </script>
 </body>
